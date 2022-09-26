@@ -63,6 +63,7 @@ x-airflow-common:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    - ./tmp:/opt/airflow/tmp
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -273,6 +274,21 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+
+  clickhouse-db:
+    <<: *airflow-common
+    image: clickhouse/clickhouse-server:22.3
+    environment:
+      CLICKHOUSE_DB: test_db
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_PASSWORD: password
+    ports:
+      - 19000:9000
+      - 18123:8123
+    volumes:
+      - ./data/clickhouse:/var/lib/clickhouse
+    
 
 volumes:
   postgres-db-volume:
