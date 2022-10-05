@@ -14,23 +14,16 @@ from utils.silpo_utils import SilpoCategories
     catchup=False,
     dagrun_timeout=datetime.timedelta(minutes=60),
 )
-def SilpoExtract():
+def SilpoAPIToBucket():
     
     categories_extract_tasks = [SilpoGetAPIDataOperator(category=category, task_id=f"silpo-{category.name.lower()}-extract") for category in SilpoCategories]
-
     all_extract_done = EmptyOperator(task_id="all_extracts_done")
+    # categories_parseJSON_tasks = [SilpoReadStoredDataOperator(category=category, task_id=f"silpo-{category.name.lower()}-parseJSON") for category in SilpoCategories]
+    # all_parseJSON_done = EmptyOperator(task_id="all_parseJSON_done")
 
     categories_extract_tasks >> all_extract_done
-    
-    categories_parseJSON_tasks = [SilpoReadStoredDataOperator(category=category, task_id=f"silpo-{category.name.lower()}-parseJSON") for category in SilpoCategories]
-
-    all_extract_done >> categories_parseJSON_tasks
-
-    all_parseJSON_done = EmptyOperator(task_id="all_parseJSON_done")
-
-    categories_parseJSON_tasks >> all_parseJSON_done
+    # all_extract_done >> categories_parseJSON_tasks
+    # categories_parseJSON_tasks >> all_parseJSON_done
 
 
-
-
-dag = SilpoExtract()
+dag = SilpoAPIToBucket()

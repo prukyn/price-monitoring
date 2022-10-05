@@ -1,6 +1,6 @@
 from typing import Any, List, Union
 from airflow.models.operator import BaseOperator
-from utils.silpo_utils import SilpoCategories
+from utils.silpo_utils import SilpoCategories, SiploBuckets
 from hooks.silpo_hooks import SilpoHook
 
 
@@ -13,11 +13,11 @@ class SilpoGetAPIDataOperator(BaseOperator):
     
     def execute(self, context) -> Any:
         
-        self.hook = SilpoHook(self.category)
+        self.hook = SilpoHook(self.category, "minio-storage", SiploBuckets.API_BUCKET)
 
         self.hook.get_data()
         
-        context["ti"].xcom_push(key=f"{self.category.name.lower()}_raw_directory", value=str(self.hook.todays_date_path))
+        # context["ti"].xcom_push(key=f"{self.category.name.lower()}_raw_directory", value=str(self.hook.todays_date_path))
 
 class SilpoReadStoredDataOperator(BaseOperator):
     
@@ -27,7 +27,7 @@ class SilpoReadStoredDataOperator(BaseOperator):
     
     def execute(self, context) -> Any:
         
-        self.hook = SilpoHook(self.category)
+        self.hook = SilpoHook(self.category, "minio-storage", SiploBuckets.API_BUCKET)
         dir_path = context["ti"].xcom_pull(
             task_ids=f"silpo-{self.category.name.lower()}-extract", 
             key=f"{self.category.name.lower()}_raw_directory",

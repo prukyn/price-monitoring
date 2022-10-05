@@ -3,10 +3,12 @@ from pathlib import Path
 import logging
 from typing import Any
 import json
+import io
 
 from airflow.providers.http.hooks.http import HttpHook
+from airflow.hooks.S3_hook import S3Hook
 
-from utils.silpo_utils import SilpoCategories
+from utils.silpo_utils import SilpoCategories, SiploBuckets
 from utils.common import chunkize
 
 class SilpoHook(HttpHook):
@@ -15,12 +17,14 @@ class SilpoHook(HttpHook):
         "Content-Type": "application/json;chaset=UTF-8",
     }
 
-    def __init__(self, category: SilpoCategories, **kwargs) -> None:
+    def __init__(self, category: SilpoCategories, storage_conn_name, bucket_name, **kwargs) -> None:
         super().__init__(method="POST", http_conn_id=None, **kwargs)
         self.category = category
         self.url = "https://api.catalog.ecom.silpo.ua/api/2.0/exec/EcomCatalogGlobal"
-        self.silpo_dir_path = Path(f"/opt/airflow/tmp/silpo/{self.category.name}_{self.category.value}")
-        self.todays_date_path = self.silpo_dir_path / f"{datetime.date.today().strftime('%Y-%m-%d')}"
+
+        self._target_dest = f"{self.category.name}_{self.category.value}/{datetime.date.today().strftime('%Y-%m-%d')}"
+        self.bucket_name = bucket_name
+        self._object_storage = S3Hook(storage_conn_name)
 
         self.parsed_data = []
 
@@ -42,7 +46,7 @@ class SilpoHook(HttpHook):
 
     def get_data(self):            
         response = self.run(self.url, json=self._request_data(), headers=self.headers).json()
-        self._save_data_locally(response, 1, 100)
+        self._save_to_bucket(response, self.bucket_name, 1, 100)
         items_count = response.get("itemsCount")
 
         logging.info(f"Total: {items_count} products")
@@ -52,18 +56,32 @@ class SilpoHook(HttpHook):
             response = self.run(self.url, json=self._request_data(items_from=_from, items_to=_to), headers=self.headers).json()
             logging.info(f"Products from: {_from} to {_to}")
             
-            self._save_data_locally(response, _from, _to)
+            self._save_to_bucket(response, self.bucket_name, _from, _to)
 
-    def _save_data_locally(self, response, items_from, items_to):
-        if not self.todays_date_path.exists():
-            self.todays_date_path.mkdir(parents=True)
-            logging.info("Today's path successfully created")
+    def _save_to_bucket(self, data, bucket_name, items_from, items_to):
+        file_path = f"{self._target_dest}/{items_from}_{items_to}.json"
+        binary_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        with io.BytesIO(binary_data) as buffer:
+            logging.info(f"Saving to bucket: {file_path}")
+            self._object_storage.load_file_obj(
+                file_obj=buffer, 
+                key=file_path, 
+                bucket_name=self.bucket_name,
+                replace=True
+            )
+            logging.info(f"Saved to bucket: {file_path} - success")
 
-        file_path = self.todays_date_path / f"{items_from}_{items_to}.json"
+
+    # def _save_data_locally(self, response, items_from, items_to):
+    #     if not self.todays_date_path.exists():
+    #         self.todays_date_path.mkdir(parents=True)
+    #         logging.info("Today's path successfully created")
+
+    #     file_path = self.todays_date_path / f"{items_from}_{items_to}.json"
         
-        with open(file_path, "w") as file:
-            json.dump(response, file, ensure_ascii=False)
-            logging.info(f"Saved file: {file_path}")
+    #     with open(file_path, "w") as file:
+    #         json.dump(response, file, ensure_ascii=False)
+    #         logging.info(f"Saved file: {file_path}")
     
     def _parse_json(self, data) -> dict:
         for item in data.get("items"):
@@ -124,3 +142,44 @@ class SilpoHook(HttpHook):
             json.dump(self.parsed_data, file, ensure_ascii=False) 
 
     
+class SilpoCategoriesHook(HttpHook):
+
+    headers = {"Content-Type": "application/json;chaset=UTF-8",}
+    data = {
+        "method": "GetMainPageCategories",
+        "data": {
+            "merchantId":1,
+            "basketGuid":"",
+            "filialId":2043,
+            "deliveryType":2,
+            "size":15
+        }
+    }
+
+    def __init__(self):
+        super().__init__(method="POST", http_conn_id=None, **kwargs)
+        self.url = "https://api.catalog.ecom.silpo.ua/api/2.0/exec/EcomCatalogGlobal"
+        self.silpo_dir_path = Path(f"/opt/airflow/tmp/silpo/categories")
+
+
+    def _parse_categories(self, data: dict):
+        headers = ["id", "name", "slug"]
+
+        for item in data.get("items", []):
+            parsed.append({
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "slug": item.get("slug")
+            })
+
+        return parsed
+
+    def _save_categories(self, data: dict):
+        pass
+
+    def siplo_categories(self):
+        response = self.run(self.url, json=self.data, headers=self.headers).json()
+
+
+
+

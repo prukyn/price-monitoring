@@ -21,3 +21,6 @@ class SilpoCategories(Enum):
     HOME = 567
     CHILDREN_THINGS = 449
     FOR_PETS = 653
+
+class SiploBuckets:
+    API_BUCKET = "silpo-api-data"
