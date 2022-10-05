@@ -288,7 +288,21 @@ services:
       - 18123:8123
     volumes:
       - ./data/clickhouse:/var/lib/clickhouse
-    
+
+  minio:
+    image: quay.io/minio/minio
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin123
+      MINIO_CONSOLE_ADDRESS: ":9090"
+    ports:
+      - 19001:9000
+      - 19090:9090
+    volumes:
+      - ${HOME}/minio/data:/data
+    command:
+      - server
+      - /data    
 
 volumes:
   postgres-db-volume:
