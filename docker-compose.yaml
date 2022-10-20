@@ -38,14 +38,22 @@
 #
 # Feel free to modify this file to suit your needs.
 ---
+
+networks:
+  application-network:
+    driver: bridge
+
+
+
+
 version: '3'
 x-airflow-common:
   &airflow-common
   # In order to add custom dependencies or upgrade provider packages you can use your extended image.
   # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
   # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.3.3}
-  # build: .
+  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.3.3}
+  build: .
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
@@ -275,8 +283,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  clickhouse-db:
-    <<: *airflow-common
+  clickhouse:
     image: clickhouse/clickhouse-server:22.3
     environment:
       CLICKHOUSE_DB: test_db
@@ -288,6 +295,7 @@ services:
       - 18123:8123
     volumes:
       - ./data/clickhouse:/var/lib/clickhouse
+      - ./logs/clickhouse:/var/log/clickhouse-server
 
   minio:
     image: quay.io/minio/minio
@@ -295,6 +303,8 @@ services:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: admin123
       MINIO_CONSOLE_ADDRESS: ":9090"
+      MINIO_API_REQUESTS_MAX: 1600
+      MINIO_API_REQUESTS_DEADLINE: 2m
     ports:
       - 19001:9000
       - 19090:9090
@@ -302,7 +312,7 @@ services:
       - ${HOME}/minio/data:/data
     command:
       - server
-      - /data    
+      - /data
 
 volumes:
   postgres-db-volume:
