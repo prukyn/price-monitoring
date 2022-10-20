@@ -1,12 +1,15 @@
 import datetime
 from pathlib import Path
 import logging
-from typing import Any
+from typing import Any, List
 import json
+from csv import DictReader
 import io
-
+from collections import OrderedDict
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.hooks.S3_hook import S3Hook
+
+from airflow_clickhouse_plugin.hooks.clickhouse_hook import ClickHouseHook
 
 from utils.silpo_utils import SilpoCategories, SiploBuckets
 from utils.common import chunkize
@@ -25,8 +28,7 @@ class SilpoHook(HttpHook):
         self._target_dest = f"{self.category.name}_{self.category.value}/{datetime.date.today().strftime('%Y-%m-%d')}"
         self.bucket_name = bucket_name
         self._object_storage = S3Hook(storage_conn_name)
-
-        self.parsed_data = []
+        self._db_object = ClickHouseHook(clickhouse_conn_id="clickhouse-connection", database="stage")
 
     def _request_data(self, items_from=1, items_to=100) -> dict:
         return {
@@ -71,6 +73,68 @@ class SilpoHook(HttpHook):
             )
             logging.info(f"Saved to bucket: {file_path} - success")
 
+    def _get_list_of_prefixes(self):
+
+        prefixes = self._object_storage.list_prefixes(
+            bucket_name=self.bucket_name,
+            prefix=f"{self.category.name}_{self.category.value}".upper(),
+            delimiter="/"
+        )
+
+        return prefixes
+
+
+    def load_to_db(self, start_date=None):
+        
+        prefixes = self._get_list_of_prefixes()
+
+        if start_date:
+            prefixes = filter(
+                lambda prefix: datetime.date.fromisoformat(prefix.split("/")[-2]) > datetime.date.fromisoformat(start_date), 
+                prefixes
+            )
+        
+        batch_for_insert = []
+
+        for prefix in prefixes:
+            list_of_files = self._object_storage.list_keys(bucket_name=self.bucket_name, prefix=prefix)
+
+            for key in list_of_files:
+                try:
+                    data = json.load(self._object_storage.get_key(key, self.bucket_name).get()["Body"])                
+                except json.JSONDecodeError as exc:
+                    logging.info(f"Exception at key: {key}, {exc}")
+                parsed_data: List = self._parse_json(data, parsed_date=datetime.date.fromisoformat(key.split("/")[-2]))
+                batch_for_insert.extend(parsed_data)
+
+        self._db_object.run('''
+            INSERT INTO stage.silpo_products(
+                name, 
+                categories, 
+                unit, 
+                price, 
+                oldPrice, 
+                image, 
+                page_link, 
+                quantity, 
+                country, 
+                packageType, 
+                promo_title, 
+                promo_startFrom, 
+                promo_stopAfter, 
+                promo_description, 
+                parsed_date, 
+                loaded_date
+            )
+            VALUES
+        ''', batch_for_insert)
+
+                
+
+                
+        
+
+        
 
     # def _save_data_locally(self, response, items_from, items_to):
     #     if not self.todays_date_path.exists():
@@ -83,19 +147,21 @@ class SilpoHook(HttpHook):
     #         json.dump(response, file, ensure_ascii=False)
     #         logging.info(f"Saved file: {file_path}")
     
-    def _parse_json(self, data) -> dict:
+    def _parse_json(self, data, parsed_date) -> OrderedDict:
+        parsed_items = []
         for item in data.get("items"):
-            
-            result_data = {
-                "categories": [category.get("id") for category in item.get("categories")],
+            result_data = OrderedDict()
+
+            result_data.update({
                 "name": item.get("name"),
+                "categories": [category.get("id") for category in item.get("categories")] or [self.category.value],
                 "unit": item.get("unit"),
                 "price": item.get("price"),
                 "oldPrice": item.get("oldPrice"),
                 "image": item.get("mainImage"),
                 "page_link": f"https://shop.silpo.ua/product/{item.get('slug')}",
                 "quantity": item.get("quantity")
-            }
+            })
             if item.get("parameters") is None:
                 logging.info(f"No params in {item.get('name')}")
                 result_data.update({
@@ -123,24 +189,14 @@ class SilpoHook(HttpHook):
                         "promo_stopAfter": promo.get("stopAfter"),
                         "promo_description": promo.get("description"),
                     })
-            self.parsed_data.append(result_data)
-
-    def process_stored_data(self, dir_path):
-        dir_path = Path(dir_path)
-        for file in filter(Path.is_file, dir_path.glob("*")):
-            with open(file) as f:
-                logging.info(f"Processing file: {file}")
-                self._parse_json(json.load(f))
-                self._save_parsed_file(dir_path)
-    
-    def _save_parsed_file(self, path):
-        path = path / "filtered"
-        if not path.exists():
-            path.mkdir(parents=True)
+            result_data.update({
+                "parsed_date": parsed_date,
+                "loaded_date": datetime.date.today()
+            })
+            parsed_items.append(tuple(item[1] for item in result_data.items()))
         
-        with open(path / "parsed.json", "w", encoding="utf-8") as file:
-            json.dump(self.parsed_data, file, ensure_ascii=False) 
-
+        return parsed_items
+        
     
 class SilpoCategoriesHook(HttpHook):
 

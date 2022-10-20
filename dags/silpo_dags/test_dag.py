@@ -1,3 +1,4 @@
+import json 
 from pathlib import Path
 
 from datetime import datetime, timedelta
@@ -13,17 +14,13 @@ def write_text_file():
 
     s3 = S3Hook('minio-storage')
     
-    for file_path in filter(Path.is_file, curdir.glob("*/*/*")):
-        print(file_path)
-        print(file_path.parts[-3:])
+    # for file_path in filter(Path.is_file, curdir.glob("*/*/*")):
+    #     print(file_path)
+    #     print(file_path.parts[-3:])
 
-        s3.load_file(
-            file_path,
-            key="/".join(file_path.parts[-3:]),
-            bucket_name="silpo-api-data",
-            replace=True
-        )
-
+    print(
+        json.load(s3.get_key("GROCERIES_65/2022-09-26/501_600.json", "silpo-api-data").get()["Body"])  
+    )
 
 @dag(
     schedule_interval="@once",

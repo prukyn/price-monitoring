@@ -4,12 +4,12 @@ import pendulum
 from airflow.decorators import dag, task
 from airflow.operators.empty import EmptyOperator
 
-from operators.silpo_operators import SilpoGetAPIDataOperator, SilpoReadStoredDataOperator
+from operators.silpo_operators import SilpoGetAPIDataOperator
 
 from utils.silpo_utils import SilpoCategories
 
 @dag(
-    schedule_interval="0 0 * * *",
+    schedule_interval="0 6 * * *",
     start_date=pendulum.datetime(2022, 8, 17, 14, 0, 0, tz="UTC"),
     catchup=False,
     dagrun_timeout=datetime.timedelta(minutes=60),
