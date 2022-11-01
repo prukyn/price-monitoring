@@ -77,20 +77,23 @@ class SilpoHook(HttpHook):
 
         prefixes = self._object_storage.list_prefixes(
             bucket_name=self.bucket_name,
-            prefix=f"{self.category.name}_{self.category.value}".upper(),
+            prefix=f"{self.category.name}_{self.category.value}/".upper(),
             delimiter="/"
         )
 
         return prefixes
 
 
-    def load_to_db(self, start_date=None):
+    def load_to_db(self, date_from=None):
         
         prefixes = self._get_list_of_prefixes()
 
-        if start_date:
+        print(prefixes)
+        print(prefixes[0].split("/")[-2])
+
+        if date_from:
             prefixes = filter(
-                lambda prefix: datetime.date.fromisoformat(prefix.split("/")[-2]) > datetime.date.fromisoformat(start_date), 
+                lambda _prefix: datetime.date.fromisoformat(_prefix.split("/")[-2]) > datetime.date.fromisoformat(date_from), 
                 prefixes
             )
         

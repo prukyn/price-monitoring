@@ -1,4 +1,6 @@
 import datetime
+import logging
+from collections import defaultdict
 import pendulum
 
 from airflow.decorators import dag, task
@@ -10,13 +12,15 @@ from airflow_clickhouse_plugin.operators.clickhouse_operator import ClickHouseOp
 
 from utils.silpo_utils import SilpoCategories
 
+latest_parse_date_for_category_result = defaultdict(lambda: '1970-01-01')
+
 @task.branch(task_id="condition")
 def select_branch_based_on_condition_func(**kwargs):
-    xcom_value = kwargs["ti"].xcom_pull(task_ids="latest_record_date_for_categories")
+    xcom_value = kwargs["ti"].xcom_pull(task_ids="latest_parse_date_for_category")
     if len(xcom_value) == 0:
         return ["ingest_all_dates"]
     
-    return ["ingest_from_date"]
+    return ["ingest_from_particular_date"]
 
 
 
@@ -27,52 +31,38 @@ def select_branch_based_on_condition_func(**kwargs):
 )
 def SilpoParseAndLoadToClickHouse():
     
-    latest_date_record = SilpoGetLatestDateForCategoriesOperator(
-        task_id="latest_record_date_for_categories",
+    latest_parse_date_for_category = SilpoGetLatestDateForCategoriesOperator(
+        task_id="latest_parse_date_for_category",
         database="stage",
         sql=(
-            """
+            f"""
             SELECT 
-                arrayJoin(categories) as category,
+                category,
                 toString(max(parsed_date))
             FROM stage.silpo_products
-            GROUP BY categories 
+            ARRAY JOIN categories as category
+            GROUP BY category 
+            HAVING category in {tuple(str(el.value) for el in SilpoCategories)}
             """
         ),
         clickhouse_conn_id="clickhouse-connection"
     )
-    #  >> PythonOperator(
-    #     task_id="print_query_result",
-    #     provide_context=True,
-    #     python_callable=lambda task_instance, **_:
-    #         print(task_instance.xcom_pull(task_ids="latest_record_date_for_categories"))
-    # )
-
 
     branching = select_branch_based_on_condition_func()
-
-    latest_date_record >> branching
-
     ingest_all_dates = EmptyOperator(task_id="ingest_all_dates")
-    ingest_from_date = SiploIngestFromDateOperator(latest_date=None, category=None, task_id="ingest_from_date")
+    ingest_from_particular_date = EmptyOperator(task_id="ingest_from_particular_date")
 
+    latest_parse_date_for_category >> branching
     branching >> ingest_all_dates
-    branching >> ingest_from_date
-
+    branching >> ingest_from_particular_date
+    
     ingest_all_dates >> [SilpoIngestAllFromBucketOperator(category=category, task_id=f"silpo-{category.name.lower()}-load") for category in SilpoCategories]
-    # ingest_all_dates >> [SilpoIngestAllFromBucketOperator(category=category, task_id=f"silpo-{category.name.lower()}-load") for category in [SilpoCategories.GROCERIES]]
-
-    # tasks = [SilpoReadStoredDataAndSaveToClickHouseOperator(category=category, task_id=f"silpo-{category.name.lower()}-load_to_CH") for category in SilpoCategories]
-
-    # tasks >> EmptyOperator(task_id="stored_successfully")
-    # categories_extract_tasks = [SilpoGetAPIDataOperator(category=category, task_id=f"silpo-{category.name.lower()}-extract") for category in SilpoCategories]
-    # all_extract_done = EmptyOperator(task_id="all_extracts_done")
-    # # categories_parseJSON_tasks = [SilpoReadStoredDataOperator(category=category, task_id=f"silpo-{category.name.lower()}-parseJSON") for category in SilpoCategories]
-    # # all_parseJSON_done = EmptyOperator(task_id="all_parseJSON_done")
-
-    # categories_extract_tasks >> all_extract_done
-    # all_extract_done >> categories_parseJSON_tasks
-    # categories_parseJSON_tasks >> all_parseJSON_done
+    
+    for category in SilpoCategories:
+        ingest_from_particular_date >> SiploIngestFromDateOperator(
+            category=category,
+            task_id=f"silpo-{category.name.lower()}-load-from-date"
+        )
 
 
 dag = SilpoParseAndLoadToClickHouse()

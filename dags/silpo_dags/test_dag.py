@@ -19,7 +19,7 @@ def write_text_file():
     #     print(file_path.parts[-3:])
 
     print(
-        json.load(s3.get_key("GROCERIES_65/2022-09-26/501_600.json", "silpo-api-data").get()["Body"])  
+        s3.list_prefixes("silpo-api-data", prefix="GROCERIES_65/", delimiter="/")  
     )
 
 @dag(
